@@ -109,10 +109,7 @@ class AlarmActivity : ComponentActivity() {
         }
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            hide(WindowInsetsCompat.Type.systemBars())
-            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
+        hideSystemBars()
 
         onBackPressedDispatcher.addCallback(this) {
             if (mode != Mode.ALARM) finish()
@@ -156,6 +153,19 @@ class AlarmActivity : ComponentActivity() {
         counter = PushupCounter(newMode.target)
         counterState = counter.state
         finished = false
+    }
+
+    /** Before Android 11 hiding is a view flag that's cleared whenever the window loses focus (e.g. a heads-up notification). */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemBars()
+    }
+
+    private fun hideSystemBars() {
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
+        }
     }
 
     override fun onStart() {

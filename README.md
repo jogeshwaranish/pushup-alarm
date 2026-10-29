@@ -1,6 +1,6 @@
 # Push-up Alarm
 
-An Android alarm that only stops after you do 15 real push-ups in front of the camera. Built for one phone (Galaxy S24+, Android 16) and installed directly, not from the Play Store.
+An Android alarm that only stops after you do 15 real push-ups in front of the camera. Works on any Android phone running Android 8.0 or newer. Install it straight from the [releases](../../releases/latest); it isn't on the Play Store.
 
 ## Why
 
@@ -10,7 +10,7 @@ So every easy way out is closed off: no snooze button, volume that can't be mute
 
 ## How it works
 
-- **Counting:** the front camera and ML Kit pose detection watch you from the side or the front (your choice under **Camera angle**, switchable on the push-up screen). A rep counts only when:
+- **Counting:** the front camera (or the back one, on phones without a front camera) and ML Kit pose detection watch you from the side or the front (your choice under **Camera angle**, switchable on the push-up screen). A rep counts only when:
   - your body is in a plank with your hands below your shoulders
   - **side view:** your elbows bend to under 100°, then lock back out past 150°
   - **front view:** your shoulders drop below 70% of their locked-out height above your hands, then rise back past 90% (the elbow angle can't be seen from the front, so the lockout height is measured at the start of each set)
@@ -45,20 +45,25 @@ Open the app and grant everything in the **Setup** list:
 | Notifications | Lets the alarm ring from the background. |
 | Full-screen alerts | Takes over the lock screen. |
 | Display over other apps | Pulls the alarm back if you leave. |
-| Unrestricted battery *(recommended)* | Stops Samsung from putting the app to sleep. |
+| Alarms & reminders *(Android 12 / 12L only)* | Lets the alarm ring at the exact minute. |
+| Unrestricted battery *(recommended)* | Stops the phone from putting the app to sleep. |
+| Auto-start *(recommended, some brands only)* | On Xiaomi, Huawei, Oppo, Vivo, OnePlus, Asus and similar phones, lets the alarm start in the background. Only shows on phones that have this setting. |
 | Device admin *(recommended)* | Disables Force stop and Uninstall. |
 
 For best counting, put the phone on the floor about 2 m to your side, so your whole side is in frame. For the front view, put it about 1.5 m in front of your head, facing you, with your shoulders and hands in frame. The push-up screen works in portrait and landscape and follows the phone's rotation.
 
 ## Install
 
-Download `pushup-alarm.apk` from the [latest release](../../releases/latest), open it on the phone and allow installing from that source. Or, from a computer:
+Download one APK from the [latest release](../../releases/latest):
 
-```bash
-adb install -r pushup-alarm.apk
-```
+| File | For |
+|---|---|
+| `pushup-alarm-<version>-arm64-v8a.apk` | Almost every phone from the last several years. Pick this if unsure. |
+| `pushup-alarm-<version>-armeabi-v7a.apk` | Older 32-bit phones |
+| `pushup-alarm-<version>-universal.apk` | Any phone (bigger download) |
+| `pushup-alarm-<version>-x86_64.apk` / `-x86.apk` | Emulators and Chromebooks |
 
-The release APK is a debug build (Android 14+, arm64 only). Then open the app and work through the Setup list.
+Needs Android 8.0 or newer. Open the APK on the phone and allow installing from that source, or from a computer run `adb install -r <file>.apk`. Then open the app and work through the Setup list. New versions install over the old one without uninstalling, because every release is signed with the same key.
 
 ## Build from source
 
@@ -73,6 +78,21 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 If `adb connect` hangs, restart the server with `adb kill-server && adb start-server` and try again.
+
+### Release builds
+
+```bash
+./gradlew testDebugUnitTest lintDebug assembleRelease
+ls app/build/dist/   # pushup-alarm-<version>-<abi>.apk and -universal.apk
+```
+
+Bump `pushup.versionCode` and `pushup.versionName` in `gradle.properties` first. Release APKs are signed with `~/.android/debug.keystore` unless `PUSHUP_KEYSTORE`, `PUSHUP_KEYSTORE_PASSWORD`, `PUSHUP_KEY_ALIAS` and `PUSHUP_KEY_PASSWORD` are set. Always sign with the same key as the installed app, or Android refuses the update; check with `apksigner verify --print-certs`.
+
+CI (GitHub Actions) runs the tests, lint and a release build on every push. Its APKs use a throwaway key, so they can't update an existing install.
+
+### Testing on emulators
+
+`scripts/emulator-smoke.sh <apk>` boots an emulator for each supported Android version in turn. On each one it installs the APK, opens practice mode, fires a real test alarm and rotates the screen, then reports PASS/FAIL.
 
 ## Escape hatch
 
@@ -97,6 +117,6 @@ Booting the phone into Safe Mode also stops the app.
 | `Receivers.kt` | Alarm fire, boot/time-change rescheduling, device admin |
 | `DeleteGate.kt` | 30 push-ups → 1 h cooldown → uninstall |
 | `OtherAlarms.kt` | Detects another app's upcoming alarm |
-| `MainScreen.kt` / `Setup.kt` | Home screen, alarm list, permission checklist |
+| `MainScreen.kt` / `Setup.kt` | Home screen, alarm list, permission checklist (adapts to Android version and phone brand) |
 
 Tunable thresholds (elbow angles, front-view percentages, torso tilt, timings) are at the top of `PushupCounter.kt`.

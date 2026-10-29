@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -80,6 +81,7 @@ fun AlarmScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(if (ringing) pulsed else Bg)
+            .safeDrawingPadding() // if the system bars do show (swiped in, or older Android), keep the buttons clear of them
             .padding(20.dp),
         camera = {
             Box(
