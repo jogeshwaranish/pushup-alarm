@@ -401,7 +401,7 @@ private fun SetupRow(item: SetupItem, onFix: () -> Unit) {
 
 private fun untilText(at: ZonedDateTime, nowMs: Long): String {
     val d = Duration.between(Instant.ofEpochMilli(nowMs), at.toInstant())
-    return "Rings in ${d.toHours()}h ${d.toMinutesPart()}m"
+    return "Rings in ${d.toHours()}h ${d.toMinutes() % 60}m" // toMinutesPart() is API 31+
 }
 
 private fun timeText(alarm: Alarm) = LocalTime.of(alarm.hour, alarm.minute).format(DateTimeFormatter.ofPattern("h:mm a"))

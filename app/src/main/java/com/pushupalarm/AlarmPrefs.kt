@@ -16,6 +16,10 @@ object AlarmPrefs {
     fun deleteUnlockAt(ctx: Context) = prefs(ctx).getLong("deleteUnlockAt", 0L)
     fun setDeleteUnlockAt(ctx: Context, atMs: Long) = prefs(ctx).edit().putLong("deleteUnlockAt", atMs).apply()
 
+    /** Whether the phone maker's auto-start screen was opened from Setup; what was chosen there can't be read. */
+    fun autoStartOpened(ctx: Context) = prefs(ctx).getBoolean("autoStartOpened", false)
+    fun setAutoStartOpened(ctx: Context) = prefs(ctx).edit().putBoolean("autoStartOpened", true).apply()
+
     /** Persisted so a reboot, crash or kill resumes the alarm instead of silencing it. */
     fun isRinging(ctx: Context) = prefs(ctx).getBoolean("ringing", false)
     fun setRinging(ctx: Context, ringing: Boolean) = prefs(ctx).edit().putBoolean("ringing", ringing).commit()

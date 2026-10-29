@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -18,6 +19,7 @@ import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import androidx.core.app.ServiceCompat
 
 /**
  * Runs for as long as the alarm is ringing. Every [TICK_MS] it re-pins the alarm volume and
@@ -45,8 +47,45 @@ class AlarmService : Service() {
             return ringPercent
         }
 
+        /** True from the first start until the service is destroyed. */
+        @Volatile var isRunning = false
+            private set
+
         fun start(ctx: Context) {
-            ctx.startForegroundService(Intent(ctx, AlarmService::class.java))
+            try {
+                ctx.startForegroundService(Intent(ctx, AlarmService::class.java))
+            } catch (_: IllegalStateException) {
+                // Android 12+ refuses when the trigger wasn't an exact alarm (e.g. the inexact fallback in
+                // AlarmScheduler). Ring via the full-screen notification instead; AlarmActivity starts the service.
+                ctx.getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notification(ctx))
+            }
+        }
+
+        private fun notification(ctx: Context): Notification {
+            val nm = ctx.getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(
+                NotificationChannel(CHANNEL, "Alarm", NotificationManager.IMPORTANCE_HIGH).apply {
+                    setSound(null, null)
+                    enableVibration(false)
+                    setBypassDnd(true)
+                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                },
+            )
+            val open = PendingIntent.getActivity(
+                ctx, 0,
+                AlarmActivity.intent(ctx, AlarmActivity.Mode.ALARM).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            return Notification.Builder(ctx, CHANNEL)
+                .setSmallIcon(R.drawable.ic_stat_alarm)
+                .setContentTitle("Wake up!")
+                .setContentText("Do ${AlarmActivity.TARGET} push-ups to stop the alarm")
+                .setCategory(Notification.CATEGORY_ALARM)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setOngoing(true)
+                .setContentIntent(open)
+                .setFullScreenIntent(open, true)
+                .build()
         }
     }
 
@@ -78,7 +117,7 @@ class AlarmService : Service() {
             return START_NOT_STICKY
         }
         try {
-            startForeground(NOTIF_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            ServiceCompat.startForeground(this, NOTIF_ID, notification(this), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         } catch (e: Exception) {
             // Not allowed to start from here (e.g. a sticky restart); come back via an alarm-clock broadcast.
             AlarmScheduler.scheduleResume(this)
@@ -87,10 +126,16 @@ class AlarmService : Service() {
         }
         if (!running) {
             running = true
+            isRunning = true
             ringPercent = AlarmPrefs.volumePercent(this)
             audio = getSystemService(AudioManager::class.java)
             originalVolume = audio.getStreamVolume(AudioManager.STREAM_ALARM)
-            vibrator = getSystemService(VibratorManager::class.java).defaultVibrator
+            vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                getSystemService(VibratorManager::class.java).defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Vibrator::class.java)
+            }
             wakeLock = getSystemService(PowerManager::class.java)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PushupAlarm:ringing")
                 .apply { acquire(2 * 60 * 60 * 1000L) }
@@ -110,6 +155,7 @@ class AlarmService : Service() {
             audio.setStreamVolume(AudioManager.STREAM_ALARM, originalVolume, 0)
         }
         wakeLock?.takeIf { it.isHeld }?.release()
+        isRunning = false
         // Killed while still ringing: resurrect.
         if (AlarmPrefs.isRinging(this)) AlarmScheduler.scheduleResume(this)
         super.onDestroy()
@@ -162,37 +208,14 @@ class AlarmService : Service() {
     }
 
     private fun startVibration() {
-        vibrator.vibrate(
-            VibrationEffect.createWaveform(longArrayOf(0, 800, 400), 0),
-            VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM),
-        )
+        val pattern = VibrationEffect.createWaveform(longArrayOf(0, 800, 400), 0)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            vibrator.vibrate(pattern, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
+        } else {
+            // Alarm usage is what lets it vibrate through Do Not Disturb before VibrationAttributes existed.
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(pattern, AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build())
+        }
         vibrating = true
-    }
-
-    private fun notification(): Notification {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Alarm", NotificationManager.IMPORTANCE_HIGH).apply {
-                setSound(null, null)
-                enableVibration(false)
-                setBypassDnd(true)
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            },
-        )
-        val open = PendingIntent.getActivity(
-            this, 0,
-            AlarmActivity.intent(this, AlarmActivity.Mode.ALARM).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        return Notification.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_alarm)
-            .setContentTitle("Wake up!")
-            .setContentText("Do ${AlarmActivity.TARGET} push-ups to stop the alarm")
-            .setCategory(Notification.CATEGORY_ALARM)
-            .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .setOngoing(true)
-            .setContentIntent(open)
-            .setFullScreenIntent(open, true)
-            .build()
     }
 }

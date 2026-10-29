@@ -7,8 +7,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.view.Display
 import android.view.KeyEvent
 import android.view.Surface
 import android.view.WindowManager
@@ -77,7 +79,7 @@ class AlarmActivity : ComponentActivity() {
         override fun onDisplayAdded(displayId: Int) = Unit
         override fun onDisplayRemoved(displayId: Int) = Unit
         override fun onDisplayChanged(displayId: Int) {
-            val rotation = display?.takeIf { it.displayId == displayId }?.rotation ?: return
+            val rotation = currentDisplay?.takeIf { it.displayId == displayId }?.rotation ?: return
             preview?.targetRotation = rotation
             analysis?.targetRotation = rotation
         }
@@ -90,8 +92,14 @@ class AlarmActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setShowWhenLocked(true)
-        setTurnScreenOn(true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            // Android 8.0 only has the window flags. No FLAG_DISMISS_KEYGUARD: the lock screen stays locked.
+            @Suppress("DEPRECATION")
+            window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         switchTo(modeOf(intent))
@@ -154,6 +162,8 @@ class AlarmActivity : ComponentActivity() {
         super.onStart()
         started = true
         isVisible = mode == Mode.ALARM
+        // Normally the service is already ringing; this covers the full-screen-notification fallback in AlarmService.start.
+        if (mode == Mode.ALARM && !AlarmService.isRunning && AlarmPrefs.isRinging(this)) AlarmService.start(this)
         ringVolume = AlarmService.ringPercent
     }
 
@@ -175,18 +185,27 @@ class AlarmActivity : ComponentActivity() {
         hasCamera = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     }
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val volumeKey = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
-            event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
-            event.keyCode == KeyEvent.KEYCODE_VOLUME_MUTE
-        if (mode != Mode.ALARM || !volumeKey) return super.dispatchKeyEvent(event)
-        // While ringing, the volume keys move this ring's level but can't take it below the floor or mute it.
-        if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
+    /** While ringing, the volume keys move this ring's level but can't take it below the floor or mute it. */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (!swallowsKey(keyCode)) return super.onKeyDown(keyCode, event)
+        when (keyCode) {
             KeyEvent.KEYCODE_VOLUME_UP -> adjustVolume(VOLUME_STEP)
             KeyEvent.KEYCODE_VOLUME_DOWN -> adjustVolume(-VOLUME_STEP)
         }
         return true
     }
+
+    /** Consumed too, or the window's default handling would still change the system volume. */
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
+        swallowsKey(keyCode) || super.onKeyUp(keyCode, event)
+
+    private fun swallowsKey(keyCode: Int) = mode == Mode.ALARM && keyCode in setOf(
+        KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_MUTE,
+    )
+
+    /** [getDisplay] is API 30+; before that an activity is always on the default display. */
+    private val currentDisplay: Display?
+        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display else @Suppress("DEPRECATION") windowManager.defaultDisplay
 
     private fun adjustVolume(deltaPercent: Int) {
         ringVolume = AlarmService.adjustVolume(this, deltaPercent)
@@ -207,7 +226,7 @@ class AlarmActivity : ComponentActivity() {
         future.addListener({
             try {
                 val provider = future.get()
-                val rotation = display?.rotation ?: Surface.ROTATION_90
+                val rotation = currentDisplay?.rotation ?: Surface.ROTATION_90
                 val preview = Preview.Builder().setTargetRotation(rotation).build()
                 preview.setSurfaceProvider(previewView.surfaceProvider)
                 val analysis = ImageAnalysis.Builder()
@@ -215,8 +234,9 @@ class AlarmActivity : ComponentActivity() {
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
                 analysis.setAnalyzer(analysisExecutor, ::analyze)
+                val camera = pickCamera(provider) ?: error("No camera found")
                 provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analysis)
+                provider.bindToLifecycle(this, camera, preview, analysis)
                 this.preview = preview
                 this.analysis = analysis
                 cameraError = null
@@ -225,6 +245,11 @@ class AlarmActivity : ComponentActivity() {
             }
         }, ContextCompat.getMainExecutor(this))
     }
+
+    /** The front camera, so you can see yourself; otherwise the back one, or whatever the phone has. */
+    private fun pickCamera(provider: ProcessCameraProvider): CameraSelector? =
+        listOf(CameraSelector.DEFAULT_FRONT_CAMERA, CameraSelector.DEFAULT_BACK_CAMERA).firstOrNull(provider::hasCamera)
+            ?: provider.availableCameraInfos.firstOrNull()?.cameraSelector
 
     @OptIn(ExperimentalGetImage::class)
     private fun analyze(proxy: ImageProxy) {
