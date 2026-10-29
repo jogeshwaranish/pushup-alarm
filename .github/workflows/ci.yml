@@ -27,7 +27,7 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - uses: android-actions/setup-android@v3
+      # ubuntu-latest ships the Android SDK (ANDROID_HOME); AGP downloads any missing platform itself.
 
       # No PUSHUP_KEYSTORE here on purpose: release falls back to a throwaway debug key
       # generated on the runner. These APKs are for checking the build only; real
