@@ -62,8 +62,14 @@ object AlarmScheduler {
         val show = PendingIntent.getActivity(
             ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
         )
-        ctx.getSystemService(AlarmManager::class.java)
-            .setAlarmClock(AlarmManager.AlarmClockInfo(atMs, show), operation)
+        val alarms = ctx.getSystemService(AlarmManager::class.java)
+        try {
+            alarms.setAlarmClock(AlarmManager.AlarmClockInfo(atMs, show), operation)
+        } catch (_: SecurityException) {
+            // Android 12/12L without "Alarms & reminders" (exact alarms) granted. Ring possibly a few minutes
+            // late rather than not at all; BootReceiver re-arms exactly once it's granted.
+            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, operation)
+        }
     }
 
     private fun alarmPending(ctx: Context, alarmId: Int) =

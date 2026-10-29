@@ -30,7 +30,10 @@ class AlarmReceiver : BroadcastReceiver() {
     }
 }
 
-/** Alarms are wiped on reboot; re-arm them, and resume ringing if the phone was restarted mid-alarm. */
+/**
+ * Alarms are wiped on reboot; re-arm them, and resume ringing if the phone was restarted mid-alarm.
+ * Also re-arms when exact alarms are granted on Android 12/12L, upgrading any inexact fallback.
+ */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         AlarmScheduler.rescheduleAll(ctx)
