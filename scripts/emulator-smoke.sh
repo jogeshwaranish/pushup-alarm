@@ -141,12 +141,12 @@ front() {
     ash dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity|ResumedActivity:' | head -2
   } | sed 's/^ *//'
 }
-display_rotation() { # 0..3 for the default display
-  local r
-  r=$(ash dumpsys input | grep -m1 -oE 'SurfaceOrientation: [0-9]' | grep -oE '[0-9]$')
-  [[ -n $r ]] || r=$(ash dumpsys window displays | grep -m1 -oE 'mRotation=[0-9]|mCurrentRotation=[^ ]+' |
-    sed -E 's/.*ROTATION_0$/0/; s/.*ROTATION_90$/1/; s/.*ROTATION_180$/2/; s/.*ROTATION_270$/3/; s/.*=//')
-  echo "${r:-?}"
+# "landscape"/"portrait" from a screenshot's PNG header (dumpsys rotation fields vary by API).
+png_orientation() { # file.png
+  local w h
+  read -r w h < <(od -An -tu4 --endian=big -j16 -N8 "$1" 2>/dev/null)
+  [[ -n ${h:-} ]] || { echo unknown; return; }
+  ((w > h)) && echo "landscape ${w}x$h" || echo "portrait ${w}x$h"
 }
 front_is() { front | grep -q "$PKG/[^ ]*$1"; }
 
@@ -399,15 +399,18 @@ run_api() {
     ash settings put system user_rotation 1
     a emu sensor set acceleration 9.81:0:0 >/dev/null 2>&1
     sleep 4
-    echo "landscape: $(display_rotation)" >"$OUT/rotation.txt"
     shot 04-alarm-landscape
+    echo "after rotate: $(png_orientation "$OUT/04-alarm-landscape.png")" >"$OUT/rotation.txt"
     ash settings put system user_rotation 0
     a emu sensor set acceleration 0:9.81:0 >/dev/null 2>&1
     sleep 4
-    echo "portrait: $(display_rotation)" >>"$OUT/rotation.txt"
     shot 05-alarm-portrait
-    log "display rotation: $(tr '\n' ' ' <"$OUT/rotation.txt")"
-    grep -q 'landscape: [13]' "$OUT/rotation.txt" || notes+=("display did not rotate to landscape")
+    echo "after rotate back: $(png_orientation "$OUT/05-alarm-portrait.png")" >>"$OUT/rotation.txt"
+    log "screen: $(tr '\n' ' ' <"$OUT/rotation.txt")"
+    if ((alarm_shown)); then
+      grep -q 'after rotate: landscape' "$OUT/rotation.txt" || notes+=("alarm screen did not rotate to landscape")
+      grep -q 'after rotate back: portrait' "$OUT/rotation.txt" || notes+=("alarm screen did not rotate back to portrait")
+    fi
     front >"$OUT/front-after-rotation.txt"
     if ((alarm_shown)) && ! front_is AlarmActivity; then
       notes+=("alarm screen gone after rotation")
