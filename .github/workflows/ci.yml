@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+
+      # No PUSHUP_KEYSTORE here on purpose: release falls back to a throwaway debug key
+      # generated on the runner. These APKs are for checking the build only; real
+      # releases are built and signed locally so the signing key never changes.
+      # --continue: still run tests and build the APKs if lint fails (the job still fails).
+      - name: Test, lint, build release APKs
+        run: ./gradlew --continue testDebugUnitTest lintDebug assembleRelease
+
+      - name: Upload APKs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pushup-alarm-apks
+          path: app/build/dist/*.apk
+          if-no-files-found: warn
+
+      - name: Upload test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: |
+            app/build/reports/
+            app/build/test-results/
+          if-no-files-found: ignore
