@@ -89,7 +89,7 @@ android {
         abortOnError = true
         checkReleaseBuilds = true
         // Real problems (NewApi, RestrictedApi, ...) stay errors and fail the build.
-        // These are "a newer version exists" / style nudges and must not fail CI.
+        // These are "a newer version exists" / style nudges and must not fail the build.
         disable += setOf("GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion", "UseKtx")
         // Only affects Play Store device filtering (CAMERA implies a back camera);
         // sideloaded installs ignore <uses-feature>.

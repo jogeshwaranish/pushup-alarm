@@ -91,7 +91,7 @@ ls app/build/dist/   # pushup-alarm-<version>-<abi>.apk and -universal.apk
 
 Bump `pushup.versionCode` and `pushup.versionName` in `gradle.properties` first. Release APKs are signed with `~/.android/debug.keystore` unless `PUSHUP_KEYSTORE`, `PUSHUP_KEYSTORE_PASSWORD`, `PUSHUP_KEY_ALIAS` and `PUSHUP_KEY_PASSWORD` are set. Always sign with the same key as the installed app, or Android refuses the update; check with `apksigner verify --print-certs`.
 
-CI (GitHub Actions) runs the tests, lint and a release build on every push. Its APKs use a throwaway key, so they can't update an existing install.
+This project doesn't use GitHub Actions or any other hosted CI, so run these checks locally before pushing.
 
 ### Testing on emulators
 
