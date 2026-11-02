@@ -15,7 +15,7 @@ data class Alarm(
 )
 
 object AlarmStore {
-    private fun prefs(ctx: Context) = ctx.getSharedPreferences("alarms", Context.MODE_PRIVATE)
+    private fun prefs(ctx: Context) = DeviceStorage.prefs(ctx, "alarms")
 
     fun all(ctx: Context): List<Alarm> {
         val json = JSONArray(prefs(ctx).getString("list", "[]"))

@@ -17,12 +17,22 @@ object AlarmScheduler {
     private const val REQ_RESUME = 3
     private const val REQ_ALARM_BASE = 1000
     private const val DUE_GRACE_MIN = 10L
+    private const val LATE_RING_WINDOW_MS = 2 * 60 * 60 * 1000L
 
-    fun nextTrigger(alarm: Alarm, now: ZonedDateTime = ZonedDateTime.now()): ZonedDateTime {
-        val today = now.withHour(alarm.hour).withMinute(alarm.minute).withSecond(0).withNano(0)
-        return (0..7L).map { today.plusDays(it) }
-            .first { it.isAfter(now) && (alarm.days.isEmpty() || it.dayOfWeek in alarm.days) }
+    /** What to do about a ring time that passed while the phone was off. */
+    enum class Missed { RING_LATE, NOTIFY }
+
+    /** Null if the ring time hasn't passed. Long-missed alarms only notify, so a morning alarm can't ring at night. */
+    fun missed(armedAtMs: Long, nowMs: Long): Missed? = when {
+        armedAtMs == 0L || armedAtMs > nowMs -> null
+        nowMs - armedAtMs <= LATE_RING_WINDOW_MS -> Missed.RING_LATE
+        else -> Missed.NOTIFY
     }
+
+    /** Works from local dates so a clock change only moves the day it happens on, never the days after it. */
+    fun nextTrigger(alarm: Alarm, now: ZonedDateTime = ZonedDateTime.now()): ZonedDateTime =
+        (0..7L).map { now.toLocalDate().plusDays(it).atTime(alarm.hour, alarm.minute).atZone(now.zone) }
+            .first { it.isAfter(now) && (alarm.days.isEmpty() || it.dayOfWeek in alarm.days) }
 
     /**
      * Whether [alarm] was due in the last few minutes. False for a stale trigger, e.g. one still set
@@ -40,10 +50,13 @@ object AlarmScheduler {
     /** Schedules an enabled alarm's next ring, or cancels a disabled one. */
     fun schedule(ctx: Context, alarm: Alarm) {
         if (!alarm.enabled) return cancel(ctx, alarm.id)
-        set(ctx, nextTrigger(alarm).toInstant().toEpochMilli(), alarmPending(ctx, alarm.id))
+        val atMs = nextTrigger(alarm).toInstant().toEpochMilli()
+        AlarmPrefs.setArmedAt(ctx, alarm.id, atMs)
+        set(ctx, atMs, alarmPending(ctx, alarm.id))
     }
 
     fun cancel(ctx: Context, alarmId: Int) {
+        AlarmPrefs.clearArmedAt(ctx, alarmId)
         ctx.getSystemService(AlarmManager::class.java).cancel(alarmPending(ctx, alarmId))
     }
 

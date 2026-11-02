@@ -20,7 +20,10 @@ So every easy way out is closed off: no snooze button, volume that can't be mute
   - The volume starts at your chosen level. The volume keys (or −/+ on screen) move it in 10% steps, but never below 20% or to mute.
   - The back button is blocked.
   - Leaving the screen brings it back within half a second.
-  - If the app is killed, it comes back. If the phone restarts, the alarm resumes after you unlock it.
+  - If the app is killed, it comes back. If the phone restarts, the alarm keeps ringing, and the push-up screen opens once you unlock.
+- **After a restart** (an overnight system update, say):
+  - Alarms still ring before you unlock the phone. It asks you to unlock, then the push-up screen opens, because the camera and pose detector can't start until then.
+  - If the phone was off when an alarm was due, it rings as soon as the phone is back on, as long as that's within 2 hours. After longer than that you get a "missed" notification instead, so a morning alarm can't ring at night.
 - **Safety valves:**
   - An **Emergency call** button opens the dialer and pauses the takeover for 30 s.
   - The alarm goes quiet during phone calls.
@@ -112,9 +115,11 @@ Booting the phone into Safe Mode also stops the app.
 | `PushupCounter.kt` | Rep-counting state machine for side and front views (pure Kotlin, unit-tested) |
 | `PoseReading.kt` | Converts ML Kit landmarks into the counter's input for the chosen camera angle |
 | `AlarmActivity.kt` / `AlarmScreen.kt` | Camera and push-up screen for alarm, disarm, practice and delete-unlock |
+| `LockedAlarmActivity.kt` | Screen shown while ringing before the first unlock after a restart |
 | `AlarmService.kt` | Foreground service: sound, vibration, volume lock, relaunch loop |
 | `Alarm.kt` / `AlarmScheduler.kt` | Alarm storage and exact `setAlarmClock` scheduling |
-| `Receivers.kt` | Alarm fire, boot/time-change rescheduling, device admin |
+| `AlarmPrefs.kt` | Settings, and the device-protected storage that keeps alarms readable before the first unlock |
+| `Receivers.kt` | Alarm fire, boot/time-change rescheduling, missed alarms, device admin |
 | `DeleteGate.kt` | 30 push-ups → 1 h cooldown → uninstall |
 | `OtherAlarms.kt` | Detects another app's upcoming alarm |
 | `MainScreen.kt` / `Setup.kt` | Home screen, alarm list, permission checklist (adapts to Android version and phone brand) |

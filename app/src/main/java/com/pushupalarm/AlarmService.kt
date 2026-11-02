@@ -11,6 +11,8 @@ import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.media.ToneGenerator
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -20,6 +22,8 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.core.app.ServiceCompat
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
 /**
  * Runs for as long as the alarm is ringing. Every [TICK_MS] it re-pins the alarm volume and
@@ -30,6 +34,9 @@ class AlarmService : Service() {
     companion object {
         private const val CHANNEL = "alarm"
         private const val NOTIF_ID = 1
+        private const val MISSED_CHANNEL = "missed"
+        private const val MISSED_NOTIF_BASE = 100
+        private const val FALLBACK_TONE = ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK
         private const val TICK_MS = 500L
 
         /** Set when the emergency-call button is tapped, so the dialer isn't covered immediately. */
@@ -72,9 +79,7 @@ class AlarmService : Service() {
                 },
             )
             val open = PendingIntent.getActivity(
-                ctx, 0,
-                AlarmActivity.intent(ctx, AlarmActivity.Mode.ALARM).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                ctx, 0, alarmScreenIntent(ctx), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             return Notification.Builder(ctx, CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat_alarm)
@@ -87,12 +92,42 @@ class AlarmService : Service() {
                 .setFullScreenIntent(open, true)
                 .build()
         }
+
+        /** The push-up screen can't open before the first unlock after a restart. */
+        private fun alarmScreenIntent(ctx: Context): Intent =
+            if (DeviceStorage.isUnlocked(ctx)) {
+                AlarmActivity.intent(ctx, AlarmActivity.Mode.ALARM)
+            } else {
+                Intent(ctx, LockedAlarmActivity::class.java)
+            }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        /** For an alarm that passed too long ago to ring now, so it isn't lost silently. */
+        fun notifyMissed(ctx: Context, alarm: Alarm) {
+            val nm = ctx.getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(NotificationChannel(MISSED_CHANNEL, "Missed alarms", NotificationManager.IMPORTANCE_HIGH))
+            val time = LocalTime.of(alarm.hour, alarm.minute).format(DateTimeFormatter.ofPattern("h:mm a"))
+            val open = PendingIntent.getActivity(
+                ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
+            )
+            nm.notify(
+                MISSED_NOTIF_BASE + alarm.id,
+                Notification.Builder(ctx, MISSED_CHANNEL)
+                    .setSmallIcon(R.drawable.ic_stat_alarm)
+                    .setContentTitle("Missed your $time alarm")
+                    .setContentText("Your phone was off when it was due to ring.")
+                    .setContentIntent(open)
+                    .setAutoCancel(true)
+                    .build(),
+            )
+        }
     }
 
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var audio: AudioManager
     private lateinit var vibrator: Vibrator
     private var player: MediaPlayer? = null
+    private var fallbackTone: ToneGenerator? = null
+    private var tonePlaying = false
     private var wakeLock: PowerManager.WakeLock? = null
     private var running = false
     private var vibrating = false
@@ -150,6 +185,8 @@ class AlarmService : Service() {
         handler.removeCallbacks(tick)
         player?.run { stop(); release() }
         player = null
+        fallbackTone?.release()
+        fallbackTone = null
         if (running) {
             vibrator.cancel()
             audio.setStreamVolume(AudioManager.STREAM_ALARM, originalVolume, 0)
@@ -168,6 +205,8 @@ class AlarmService : Service() {
         )
         if (inCall) {
             player?.takeIf { it.isPlaying }?.pause()
+            if (tonePlaying) fallbackTone?.stopTone()
+            tonePlaying = false
             if (vibrating) vibrator.cancel()
             vibrating = false
             return
@@ -175,22 +214,38 @@ class AlarmService : Service() {
 
         audio.setStreamVolume(AudioManager.STREAM_ALARM, AlarmSound.index(this, ringPercent), 0)
         player?.takeIf { !it.isPlaying }?.start()
+        if (!tonePlaying) tonePlaying = fallbackTone?.startTone(FALLBACK_TONE) == true
         if (!vibrating) startVibration()
-        if (!AlarmActivity.isVisible && System.currentTimeMillis() > emergencyUntil) launchAlarmScreen()
+        // Not before the first unlock: bringing a screen back every tick would keep closing the PIN entry.
+        if (DeviceStorage.isUnlocked(this) && !AlarmActivity.isVisible && System.currentTimeMillis() > emergencyUntil) {
+            launchAlarmScreen()
+        }
     }
 
     private fun launchAlarmScreen() {
         try {
-            startActivity(AlarmActivity.intent(this, AlarmActivity.Mode.ALARM).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            startActivity(alarmScreenIntent(this))
         } catch (_: Exception) {
             // Background launch blocked; the full-screen notification is the fallback.
         }
     }
 
+    /** The alarm must never be silent: if no sound file can be played, use a tone that needs no file. */
     private fun startSound() {
-        val uri = AlarmSound.uri(this) ?: return
-        player = try {
-            MediaPlayer().apply {
+        player = AlarmSound.uris(this).firstNotNullOfOrNull(::play)
+        if (player == null) {
+            fallbackTone = try {
+                ToneGenerator(AudioManager.STREAM_ALARM, ToneGenerator.MAX_VOLUME)
+            } catch (_: RuntimeException) {
+                null
+            }
+        }
+    }
+
+    private fun play(uri: Uri): MediaPlayer? {
+        val mediaPlayer = MediaPlayer()
+        return try {
+            mediaPlayer.apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ALARM)
@@ -203,6 +258,7 @@ class AlarmService : Service() {
                 start()
             }
         } catch (_: Exception) {
+            mediaPlayer.release()
             null
         }
     }

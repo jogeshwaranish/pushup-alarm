@@ -17,6 +17,13 @@ object AlarmSound {
         ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
         ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
 
+    /** Sounds to try in order. Before the first unlock the chosen one may be unreadable, but the system's copy usually isn't. */
+    fun uris(ctx: Context): List<Uri> = listOfNotNull(
+        uri(ctx),
+        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
+        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+    ).distinct()
+
     /** The alarm-stream volume index for [percent], by default the user's chosen level. */
     fun index(ctx: Context, percent: Int = AlarmPrefs.volumePercent(ctx)): Int {
         val max = ctx.getSystemService(AudioManager::class.java).getStreamMaxVolume(AudioManager.STREAM_ALARM)

@@ -33,6 +33,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.google.mlkit.common.MlKit
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.pose.PoseDetection
 import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
@@ -86,9 +87,12 @@ class AlarmActivity : ComponentActivity() {
     }
 
     private val analysisExecutor = Executors.newSingleThreadExecutor()
-    private val detector = PoseDetection.getClient(
-        PoseDetectorOptions.Builder().setDetectorMode(PoseDetectorOptions.STREAM_MODE).build(),
-    )
+    private val detectorDelegate = lazy {
+        // If the app started before the first unlock, ML Kit's own start-up may not have run yet.
+        MlKit.initialize(applicationContext)
+        PoseDetection.getClient(PoseDetectorOptions.Builder().setDetectorMode(PoseDetectorOptions.STREAM_MODE).build())
+    }
+    private val detector by detectorDelegate
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -185,7 +189,7 @@ class AlarmActivity : ComponentActivity() {
 
     override fun onDestroy() {
         getSystemService(DisplayManager::class.java).unregisterDisplayListener(rotationListener)
-        detector.close()
+        if (detectorDelegate.isInitialized()) detector.close()
         analysisExecutor.shutdown()
         super.onDestroy()
     }
